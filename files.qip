@@ -17,5 +17,6 @@ set_global_assignment -name VHDL_FILE vdp.vhd
 set_global_assignment -name VHDL_FILE system.vhd
 set_global_assignment -name VHDL_FILE io.vhd
 set_global_assignment -name SYSTEMVERILOG_FILE SMS.sv
-set_global_assignment -name VERILOG_FILE sys/joydb9md.v
+set_global_assignment -name VERILOG_FILE joydb9md.v
+set_global_assignment -name VERILOG_FILE joydb15.v
 

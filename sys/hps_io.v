@@ -473,6 +473,8 @@ always@(posedge clk_sys) begin
 							
 					// Reading user_io raw joy
 					'h0f: io_dout <= joy_raw;
+// buttons and switches
+'h01: cfg <= io_din;
 
 					//menu mask
 					'h2E: if(byte_cnt == 1) io_dout <= status_menumask;
