@@ -244,8 +244,8 @@ wire        forced_scandoubler;
 wire [21:0] gamma_bus;
 
 //S B A U D L R 
-wire [31:0] joy_0 = joydb_1ena ? (OSD_STATUS? 32'b000000 : {joydb_1[10],joydb_1[5:0]}) : joy_0_USB;
-wire [31:0] joy_1 = joydb_2ena ? (OSD_STATUS? 32'b000000 : {joydb_2[10],joydb_2[5:0]}) : joydb_1ena ? joy_0_USB : joy_1_USB;
+wire [31:0] joy_0 = joydb_1ena ? (OSD_STATUS? 32'b000000 : {joydb_1[5],joydb_1[6],joydb_1[3:0]}) : joy_0_USB;
+wire [31:0] joy_1 = joydb_2ena ? (OSD_STATUS? 32'b000000 : {joydb_2[5],joydb_2[6],joydb_2[3:0]}) : joydb_1ena ? joy_0_USB : joy_1_USB;
 
 wire [15:0] joydb_1 = JOY_FLAG[2] ? JOYDB9MD_1 : JOY_FLAG[1] ? JOYDB15_1 : '0;
 wire [15:0] joydb_2 = JOY_FLAG[2] ? JOYDB9MD_2 : JOY_FLAG[1] ? JOYDB15_2 : '0;
