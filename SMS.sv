@@ -134,7 +134,7 @@ wire   [5:0] JOY_MDIN  = JOY_FLAG[2] ? {USER_IN[6],USER_IN[3],USER_IN[5],USER_IN
 wire         JOY_DATA  = JOY_FLAG[1] ? USER_IN[5] : '1;
 //assign       USER_OUT  = JOY_FLAG[2] ? {3'b111,JOY_SPLIT,3'b111,JOY_MDSEL} : JOY_FLAG[1] ? {6'b111111,JOY_CLK,JOY_LOAD} : '1;
 assign       USER_MODE = JOY_FLAG[2:1] ;
-assign       USER_OSD  = joydb_1[10] & joydb_1[6]; // A�adir esto para OSD
+assign       USER_OSD  = joydb_1[10] & joydb_1[6];
 
 assign VGA_F1 = 0;
 
@@ -163,7 +163,6 @@ parameter CONF_STR = {
 	"-;",
 	"OUV,UserIO Joystick,Off,DB9MD,DB15 ;",
 	"OT,UserIO Players, 1 Player,2 Players;",
-	"OS,Native Joysticks,No,Yes;",
 	"-;",
 	"D0R6,Load Backup RAM;",
 	"D0R7,Save Backup RAM;",
@@ -254,9 +253,9 @@ wire [21:0] gamma_bus;
 
 wire [24:0] ps2_mouse;
 
-//S C B U D L R / S B C U D L R
-wire [31:0] joy_0 = joydb_1ena? (OSD_STATUS? 32'b000000 : (!status[28]? {joydb_1[10],joydb_1[6],joydb_1[5],joydb_1[3:0]} : {joydb_1[10],joydb_1[5],joydb_1[6],joydb_1[3:0]}) ) : joy_0_USB;
-wire [31:0] joy_1 = joydb_2ena? (OSD_STATUS? 32'b000000 : (!status[28]? {joydb_2[10],joydb_2[6],joydb_2[5],joydb_2[3:0]} : {joydb_2[10],joydb_2[5],joydb_2[6],joydb_2[3:0]}) ) : joydb_1ena ? joy_0_USB : joy_1_USB;
+//S C B U D L R
+wire [31:0] joy_0 = joydb_1ena? (OSD_STATUS? 32'b000000 : {joydb_1[10],joydb_1[6],joydb_1[5],joydb_1[3:0]}) : joy_0_USB;
+wire [31:0] joy_1 = joydb_2ena? (OSD_STATUS? 32'b000000 : {joydb_2[10],joydb_2[6],joydb_2[5],joydb_2[3:0]}) : joydb_1ena ? joy_0_USB : joy_1_USB;
 
 wire [15:0] joydb_1 = JOY_FLAG[2] ? JOYDB9MD_1 : JOY_FLAG[1] ? JOYDB15_1 : '0;
 wire [15:0] joydb_2 = JOY_FLAG[2] ? JOYDB9MD_2 : JOY_FLAG[1] ? JOYDB15_2 : '0;
@@ -587,16 +586,16 @@ always @(posedge clk_sys) begin
 	reg [15:0] tmr;
 
 	if (raw_serial) begin
-		joyser[3] <= USER_IN[1];//up
-		joyser[2] <= USER_IN[0];//down	
-		joyser[1] <= USER_IN[5];//left
-		joyser[0] <= USER_IN[3];//right	
-		joyser[4] <= USER_IN[2];//trigger / button1
+		joyser[3] <= USER_IN[5];//up
+		joyser[2] <= USER_IN[7];//down	
+		joyser[1] <= USER_IN[1];//left
+		joyser[0] <= USER_IN[2];//right	
+		joyser[4] <= USER_IN[3];//trigger / button1
 		joyser[5] <= USER_IN[6];//button2
-		joyser_th <= USER_IN[4];//sensor
-		
+		joyser_th <= USER_IN[0];//sensor
+
 		if (tmr) tmr <= tmr - 1'd1;
-		if (!USER_IN[0] & !USER_IN[2] & !USER_IN[6] & pause_combo) begin //D 1 2 combo
+		if (!USER_IN[7] & !USER_IN[3] & !USER_IN[6] & pause_combo) begin //D 1 2 combo
 			tmr <= 57000;
 		end
 		joyser[6] <= !tmr;
@@ -629,8 +628,7 @@ always @(posedge clk_sys) begin
 
 		if(reset | ~status[14]) jcnt <= 0;
 	
-		USER_OUT <= JOY_FLAG[2] ? {3'b111,JOY_SPLIT,3'b111,JOY_MDSEL} : JOY_FLAG[1] ? {6'b111111,JOY_CLK,JOY_LOAD} : 7'b1111111;;
-		//USER_OUT <= 7'b1111111;
+		USER_OUT <= JOY_FLAG[2] ? {3'b111,JOY_SPLIT,3'b111,JOY_MDSEL} : JOY_FLAG[1] ? {6'b111111,JOY_CLK,JOY_LOAD} : '1;
 	end
 	
 	if(gun_en) begin
@@ -870,5 +868,3 @@ lightgun lightgun
 );
 
 endmodule
-
-
