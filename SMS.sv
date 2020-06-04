@@ -132,7 +132,7 @@ wire   [2:0] JOY_FLAG  = {status[30],status[31],status[29]}; //Assign 3 bits of 
 wire         JOY_CLK, JOY_LOAD, JOY_SPLIT, JOY_MDSEL;
 wire   [5:0] JOY_MDIN  = JOY_FLAG[2] ? {USER_IN[6],USER_IN[3],USER_IN[5],USER_IN[7],USER_IN[1],USER_IN[2]} : '1;
 wire         JOY_DATA  = JOY_FLAG[1] ? USER_IN[5] : '1;
-//assign       USER_OUT  = JOY_FLAG[2] ? {3'b111,JOY_SPLIT,3'b111,JOY_MDSEL} : JOY_FLAG[1] ? {6'b111111,JOY_CLK,JOY_LOAD} : '1;
+//assign USER_OUT  = JOY_FLAG[2] ? {3'b111,JOY_SPLIT,3'b111,JOY_MDSEL} : JOY_FLAG[1] ? {6'b111111,JOY_CLK,JOY_LOAD} : '1;
 assign       USER_MODE = JOY_FLAG[2:1] ;
 assign       USER_OSD  = joydb_1[10] & joydb_1[6];
 
@@ -161,9 +161,6 @@ parameter CONF_STR = {
 	"C,Cheats;",
 	"H1OO,Cheats enabled,ON,OFF;",
 	"-;",
-	"OUV,UserIO Joystick,Off,DB9MD,DB15 ;",
-	"OT,UserIO Players, 1 Player,2 Players;",
-	"-;",
 	"D0R6,Load Backup RAM;",
 	"D0R7,Save Backup RAM;",
 	"D0ON,Autosave,OFF,ON;",
@@ -187,6 +184,9 @@ parameter CONF_STR = {
 	"P1H2OC,SMS FM sound,Enable,Disable;",
 
 	"P2,Input;",
+	"P2-;",
+	"P2OUV,UserIO Joystick,Off,DB9MD,DB15 ;",
+	"P2OT,UserIO Players, 1 Player,2 Players;",
 	"P2-;",
 	"P2O1,Swap joysticks,No,Yes;",
 	"P2OE,Multitap,Disabled,Port1;",
@@ -585,7 +585,7 @@ always @(posedge clk_sys) begin
 	reg old_th;
 	reg [15:0] tmr;
 
-	if (raw_serial) begin
+	if  (raw_serial &  ~status[31]  & ~status[30]) begin //Esto da igual se puede borrar
 		joyser[3] <= USER_IN[5];//up
 		joyser[2] <= USER_IN[7];//down	
 		joyser[1] <= USER_IN[1];//left
@@ -605,7 +605,7 @@ always @(posedge clk_sys) begin
 		joya_th <=  swap ? 1'b1 : joyser_th;
 		joyb_th <=  swap ? joyser_th : 1'b1;
 
-		USER_OUT <= {swap ? joyb_tr_out : joya_tr_out, 1'b1, swap ? joyb_th_out : joya_th_out, 4'b1111, };
+		USER_OUT <= {swap ? joyb_tr_out : joya_tr_out, 1'b1, swap ? joyb_th_out : joya_th_out, 5'b11111, };
 
 	end else begin
 		joya <= ~joy[jcnt];
@@ -627,8 +627,8 @@ always @(posedge clk_sys) begin
 		end
 
 		if(reset | ~status[14]) jcnt <= 0;
-	
-		USER_OUT <= JOY_FLAG[2] ? {3'b111,JOY_SPLIT,3'b111,JOY_MDSEL} : JOY_FLAG[1] ? {6'b111111,JOY_CLK,JOY_LOAD} : '1;
+
+		USER_OUT <= JOY_FLAG[2] ? {3'b111,JOY_SPLIT,3'b111,JOY_MDSEL} : JOY_FLAG[1] ? {6'b111111,JOY_CLK,JOY_LOAD} : 7'b1111111;
 	end
 	
 	if(gun_en) begin
