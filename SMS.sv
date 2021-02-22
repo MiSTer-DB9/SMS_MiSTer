@@ -39,8 +39,9 @@ module emu
 	output        CE_PIXEL,
 
 	//Video aspect ratio for HDMI. Most retro systems have ratio 4:3.
-	output [11:0] VIDEO_ARX,
-	output [11:0] VIDEO_ARY,
+	//if VIDEO_ARX[12] or VIDEO_ARY[12] is set then [11:0] contains scaled size instead of aspect ratio.
+	output [12:0] VIDEO_ARX,
+	output [12:0] VIDEO_ARY,
 
 	output  [7:0] VGA_R,
 	output  [7:0] VGA_G,
@@ -203,14 +204,15 @@ always @(posedge CLK_VIDEO) en216p <= ((HDMI_WIDTH == 1920) && (HDMI_HEIGHT == 1
 
 wire [1:0] ar = status[27:26];
 wire vga_de;
-video_crop video_crop
+video_freak video_freak
 (
 	.*,
 	.VGA_DE_IN(vga_de),
-	.ARX((!ar) ? 12'd4 : (ar - 1'd1)),
-	.ARY((!ar) ? 12'd3 : 12'd0),
+	.ARX((!ar) ? (border ? 12'd47 : 12'd32) : (ar - 1'd1)),
+	.ARY((!ar) ? (border ? 12'd35 : 12'd21) : 12'd0),
 	.CROP_SIZE(en216p ? 10'd216 : 10'd0),
-	.CROP_OFF(0)
+	.CROP_OFF(0),
+	.SCALE(status[31:30])
 );
 
 
@@ -219,7 +221,7 @@ video_crop video_crop
 // 0         1         2         3          4         5         6   
 // 01234567890123456789012345678901 23456789012345678901234567890123
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 `include "build_id.v"
 parameter CONF_STR = {
@@ -246,6 +248,8 @@ parameter CONF_STR = {
 	"P1O2,TV System,NTSC,PAL;",
 	"P1OQR,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"P1O35,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"P1-;",
+	"P1OUV,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
 	"P1-;",
 	"P1OD,Border,No,Yes;",
 	"D5P1OST,Masked left column,BG,Black,Cut;",
@@ -740,6 +744,7 @@ wire [11:0] color;
 wire mask_column;
 wire smode_M1, smode_M2, smode_M3;
 wire pal = status[2];
+wire border = status[13] & ~gg;
 
 video video
 (
@@ -747,7 +752,7 @@ video video
 	.ce_pix(ce_pix),
 	.pal(pal),
 	.gg(gg),
-	.border(status[13] & ~gg),
+	.border(border),
 	.mask_column(mask_column),
 	.cut_mask(status[29]),
    .smode_M1(smode_M1),
