@@ -221,26 +221,30 @@ video_freak video_freak
 // 0         1         2         3          4         5         6   
 // 01234567890123456789012345678901 23456789012345678901234567890123
 // 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
-// XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+// XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX XXXXX
 
 `include "build_id.v"
 parameter CONF_STR = {
 	"SMS;;",
 	"-;",
-	"FS1,SMSSG;",
-	"FS2,GG;",
+	"H8FS1,SMSSG;",
+	"H8FS2,GG;",
+	"H8-;",
+	"DIP;",
 	"-;",
 	"C,Cheats;",
 	"H1OO,Cheats enabled,ON,OFF;",
 	"-;",
-	"D0R6,Load Backup RAM;",
-	"D0R7,Save Backup RAM;",
-	"D0OP,Autosave,OFF,ON;",
+	"H8D0R6,Load Backup RAM;",
+	"H8D0R7,Save Backup RAM;",
+	"H8D0OP,Autosave,OFF,ON;",
 	"-;",
 
-	"OA,Region,US/UE,Japan;",
-	"OB,BIOS,Enable,Disable;",
-	"OF,Disable mapper,No,Yes;",
+	"H8OA,Region,US/UE,Japan;",
+	"H8OB,BIOS,Enable,Disable;",
+	"H8OF,Disable mapper,No,Yes;",
+	"H7o12,VDPs,Both,2,1,None;",
+	"H7o34,PSGs,Both,2,1,None;",
 	"-;",
 
 	"P1,Audio & Video;",
@@ -272,12 +276,14 @@ parameter CONF_STR = {
 	"D4P2OK,Gun Fire,Joy,Mouse;",
 	"D4P2OL,Gun Port,Port1,Port2;",
 	"D4P2OMN,Cross,Small,Medium,Big,None;",
+	"P2-;",
+	"P2o0,Paddle,Disabled,Enabled;",
 
 	"-;",
 	"R0,Reset;",
-	"J1,Fire 1,Fire 2,Pause;",
-	"jn,A,B,Start;",
-	"jp,Y,A,Start;",
+	"J1,Fire 1,Fire 2,Pause,Coin;",
+	"jn,A|P,B,Start,Coin;",
+	"jp,Y|P,A,Start,Coin;",
 	"V,v",`BUILD_DATE
 };
 
@@ -298,9 +304,12 @@ pll pll
 wire reset = RESET | status[0] | buttons[1] | cart_download | bk_loading;
 
 //////////////////   HPS I/O   ///////////////////
-wire  [6:0] joy[4], joy_0_USB, joy_1_USB;
+wire  [15:0] joy_0_USB, joy_1_USB, joy_2_USB, joy_3_USB;
+wire  [7:0] joy[4];
 wire  [7:0] joy0_x,joy0_y,joy1_x,joy1_y;
+wire  [7:0] paddle_0, paddle_1;
 wire  [1:0] buttons;
+wire [10:0] ps2_key;
 wire [63:0] status;
 
 wire        ioctl_wr;
@@ -372,15 +381,18 @@ hps_io #(.STRLEN($size(CONF_STR)>>3), .WIDE(0)) hps_io
 
 	.joystick_0(joy_0_USB),
 	.joystick_1(joy_1_USB),
-	.joystick_2(joy[2]),
-	.joystick_3(joy[3]),
+	.joystick_2(joy_2_USB),
+	.joystick_3(joy_3_USB),
 	.joystick_analog_0({joy0_y, joy0_x}),
 	.joystick_analog_1({joy1_y, joy1_x}),
-	.joy_raw(OSD_STATUS? (joydb_1[5:0]|joydb_2[5:0]) : 6'b000000 ), //Menu Dirs, A:Action B:Back (OSD)
-
+	.paddle_0(paddle_0),
+	.paddle_1(paddle_1),
+	.joy_raw(OSD_STATUS? (joydb_1[5:0]|joydb_2[5:0]) : 6'b000000 ), //Menu Dirs, A:Action B:Bac
+	
 	.buttons(buttons),
+	.ps2_key(ps2_key),
 	.status(status),
-	.status_menumask({en216p,status[13],~gun_en,~raw_serial,gg,~gg_avail,~bk_ena}),
+	.status_menumask({systeme,~dbg_menu,en216p,status[13],~gun_en,~raw_serial,gg,~gg_avail,~bk_ena}),
 	.forced_scandoubler(forced_scandoubler),
 	.new_vmode(pal),
 	.gamma_bus(gamma_bus),
@@ -418,7 +430,18 @@ wire        ram_rd;
 
 wire code_index = &ioctl_index;
 wire code_download = ioctl_download & code_index;
-wire cart_download = ioctl_download & ~code_index;
+wire cart_download = ioctl_download & ~(|ioctl_index[7:2]);
+
+// SYSMODE[0]: [0]=EncryptBase,[1]=EncryptBank,[2]=Paddle,[3]=Pedal,[4,5]=E0Type,[6]=E1,[7]=E2
+// SYSMODE[1]: [0]=
+reg [7:0] SYSMODE[1];
+reg [7:0] DSW[3];
+always @(posedge clk_sys) begin
+	if (ioctl_wr) begin
+		if ((ioctl_index==4  ) && !ioctl_addr[24:1]) SYSMODE[ioctl_addr[0]] <= ioctl_dout;
+		if ((ioctl_index==254) && !ioctl_addr[24:2]) DSW[ioctl_addr[1:0]] <= ioctl_dout;
+	end
+end
 
 sdram ram
 (
@@ -426,7 +449,7 @@ sdram ram
 
 	.init(~locked),
 	.clk(clk_sys),
-	.clkref(ce_cpu),
+	.clkref(systeme ? ce_pix : ce_cpu),
 
 	.waddr(romwr_a),
 	.din(ioctl_dout),
@@ -534,6 +557,7 @@ always @(posedge clk_sys) begin
 end
 
 reg gg = 0;
+reg systeme = 0;
 reg [21:0] cart_mask, cart_mask512;
 reg cart_sz512;
 
@@ -547,13 +571,17 @@ always @(posedge clk_sys) begin
 		if(!ioctl_addr) cart_mask <= 0;
 		if(ioctl_addr == 512) cart_mask512 <= 0;
 		gg <= ioctl_index[4:0] == 2;	
+		systeme <= ioctl_index[4:0] == 3;	
 	end;
 	if (old_download & ~cart_download) begin
 		cart_sz512 <= ioctl_addr[9];
 	end;
+	if (ioctl_wr & (ioctl_index==4)) begin
+		systeme <= 1'b1;;
+	end;
 end
 
-wire [12:0] ram_a;
+wire [13:0] ram_a;
 wire        ram_we;
 wire  [7:0] ram_d;
 wire  [7:0] ram_q;
@@ -571,7 +599,8 @@ system #(63) system
 	.ce_pix(ce_pix),
 	.ce_sp(ce_sp),
 	.gg(gg),
-	.bios_en(~status[11]),
+	.systeme(systeme),
+	.bios_en(~status[11] & ~systeme),
 
 	.RESET_n(~reset),
 
@@ -591,6 +620,8 @@ system #(63) system
 	.j1_tl(joya[4]),
 	.j1_tr(joya[5]),
 	.j1_th(joya_th),
+	.j1_start(swap ? joy_1[11] : joy_0[11]),
+	.j1_coin(swap ? joy_1[10] : joy_0[10]),
 
 	.j2_up(joyb[3]),
 	.j2_down(joyb[2]),
@@ -600,12 +631,27 @@ system #(63) system
 	.j2_tr(joyb[5]),
 	.j2_th(joyb_th),
 	.pause(joya[6]&joyb[6]),
+	.j2_start(swap ? joy_0[11] : joy_1[11]),
+	.j2_coin(swap ? joy_0[10] : joy_1[10]),
 
 	.j1_tr_out(joya_tr_out),
 	.j1_th_out(joya_th_out),
 	.j2_tr_out(joyb_tr_out),
 	.j2_th_out(joyb_th_out),
 
+	.E0Type(SYSMODE[0][5:4]),
+	.E1Use(SYSMODE[0][6]),
+	.E2Use(SYSMODE[0][7]),
+	.F2(DSW[0]),
+	.F3(DSW[1]),
+	.E0(DSW[2]),
+
+	.has_pedal(SYSMODE[0][3]),
+	.has_paddle(SYSMODE[0][2]),
+	.paddle(paddle),
+	.paddle2(paddle2),
+	.pedal(pedal),
+		
 	.x(x),
 	.y(y),
 	.color(color),
@@ -616,7 +662,9 @@ system #(63) system
 	.smode_M3(smode_M3),
 	.pal(pal),
 	.region(status[10]),
-	.mapper_lock(status[15]),
+	.mapper_lock(status[15] && ~systeme),
+	.vdp_enables(dbg_menu ? status[34:33] : 2'b00),
+	.psg_enables(dbg_menu ? status[36:35] : 2'b00),
 
 	.fm_ena(~status[12] | gg),
 	.audioL(audio_l),
@@ -633,19 +681,43 @@ system #(63) system
 	.nvram_a(nvram_a),
 	.nvram_we(nvram_we),
 	.nvram_d(nvram_d),
-	.nvram_q(nvram_q)
+	.nvram_q(nvram_q),
+	
+	.encrypt(SYSMODE[0][1:0]),
+	.key_a(key_a),
+	.key_d(key_d)
+	
 );
 
-assign joy[0] = status[1] ? joy_1 : joy_0;
-assign joy[1] = status[1] ? joy_0 : joy_1;
+wire [12:0] key_a;
+wire [7:0] key_d;
+
+wire [12:0] encrypt_a;
+
+wire encrypt_range = ioctl_addr[24:13]==12'b0_0000_0100_100;
+assign encrypt_a = (ioctl_download && encrypt_range) ? ioctl_addr[12:0] : key_a;
+
+spram #(.widthad_a(13)) encrypt_key
+(
+	.clock(clk_sys),
+	.wren(ioctl_wr && encrypt_range),
+	.data(ioctl_dout),
+	.address(encrypt_a),
+	.q(key_d)
+);
+
+assign joy[0] = status[1] ? joy_1[7:0] : joy_0[7:0];
+assign joy[1] = status[1] ? joy_0[7:0] : joy_1[7:0];
+assign joy[2] = joy_2[7:0];
+assign joy[3] = joy_3[7:0];
 
 wire raw_serial = status[16];
 wire pause_combo = status[17];
 wire swap = status[1];
 
-wire [6:0] joya;	
-wire [6:0] joyb;
-wire [6:0] joyser;
+wire [7:0] joya;	
+wire [7:0] joyb;
+wire [7:0] joyser;
 
 wire      joya_tr_out;
 wire      joya_th_out;
@@ -655,6 +727,13 @@ wire      joya_th;
 wire      joyb_th;
 wire      joyser_th;
 reg [1:0] jcnt = 0;
+
+wire has_pedal = SYSMODE[0][3];
+wire [7:0] pedal = paddle_en ? paddle_1 : !joy0_y[7] ? 8'h00: {~joy0_y[6:0],~joy0_y[6]};
+wire [7:0] paddlein = paddle_en ? paddle_0 : has_pedal ? {~joy0_x[7],joy0_x[6:0]} : {joy0_x[7],joy0_x[7],joy0_x[7],joy0_x[7],joy0_x[7],joy0_x[7:5]};
+wire [7:0] paddle2 = paddle_en ? paddle_1 : joy1_x;
+wire [7:0] pedallimit = paddlein[7:5]==3'b111 ? 8'hE0 : paddlein[7:5]==3'b000 ? 8'h20 : paddlein;
+wire [7:0] paddle = has_pedal ? pedallimit : paddlein;
 
 always @(posedge clk_sys) begin
 	reg old_th;
@@ -674,6 +753,7 @@ always @(posedge clk_sys) begin
 			tmr <= 57000;
 		end
 		joyser[6] <= !tmr;
+		joyser[7] <= 1'b0;
 		
 		joya <= swap ? ~joy[1] : joyser;
 		joyb <= swap ? joyser : ~joy[0];	
@@ -684,7 +764,7 @@ always @(posedge clk_sys) begin
 
 	end else begin
 		joya <= ~joy[jcnt];
-		joyb <= status[14] ? 7'h7F : ~joy[1];
+		joyb <= status[14] ? 8'hFF : ~joy[1];
 		joya_th <=  1'b1;
 		joyb_th <=  1'b1;
 				
@@ -709,21 +789,25 @@ always @(posedge clk_sys) begin
 	if(gun_en) begin
 		if(gun_port) begin
 			joyb_th <= ~gun_sensor;
-			joyb <= {2'b11, ~gun_trigger ,4'b1111};
+			joyb <= {3'b111, ~gun_trigger ,4'b1111};
 		end else begin
 			joya_th <= ~gun_sensor;
-			joya <= {2'b11, ~gun_trigger ,4'b1111};
+			joya <= {3'b111, ~gun_trigger ,4'b1111};
 			joyb <= raw_serial ? joyser : ~joy[0];
 			joyb_th <= raw_serial ? joyser_th : 1'b1;
 		end
 	end
-end	
 
+	if (paddle_en) begin
+		{joya[0], joya[1], joya[2], joya[3], joya[5]} <= {paddle_0_nib, paddle_0_tr};
+		{joyb[0], joyb[1], joyb[2], joyb[3], joyb[5]} <= {paddle_1_nib, paddle_1_tr};
+	end
+end
 
-spram #(.widthad_a(13)) ram_inst
+spram #(.widthad_a(14)) ram_inst
 (
 	.clock     (clk_sys),
-	.address   (ram_a),
+	.address   (systeme ? ram_a : {1'b0,ram_a[12:0]}),
 	.wren      (ram_we),
 	.data      (ram_d),
 	.q         (ram_q)
@@ -731,12 +815,15 @@ spram #(.widthad_a(13)) ram_inst
 
 wire [15:0] audio_l, audio_r; 
 
-compressor compressor
-(
-	clk_sys,
-	audio_l[15:4], audio_r[15:4],
-	AUDIO_L,       AUDIO_R
-); 
+assign AUDIO_L=audio_l;
+assign AUDIO_R=audio_r;
+
+//compressor compressor
+//(
+//	clk_sys,
+//	audio_l[15:4], audio_r[15:4],
+//	AUDIO_L,       AUDIO_R
+//); 
 
 wire [8:0] x;
 wire [8:0] y;
@@ -924,7 +1011,7 @@ lightgun lightgun
 
 	.JOY_X(gun_mode[0] ? joy0_x : joy1_x),
 	.JOY_Y(gun_mode[0] ? joy0_y : joy1_y),
-	.JOY(gun_mode[0] ? joy_0 : joy_1),
+	.JOY(gun_mode[0] ? joy_0[7:0] : joy_1[7:0]),
 
 	.HDE(~HBlank),
 	.VDE(~VBlank),
@@ -938,5 +1025,89 @@ lightgun lightgun
 	.SENSOR(gun_sensor),
 	.TRIGGER(gun_trigger)
 );
+
+// Paddle support
+wire       jp_region    = status[10];
+wire       paddle_en    = status[32];
+
+reg  [3:0] paddle_0_nib,   paddle_1_nib;
+reg  [3:0] paddle_0_nib_q, paddle_1_nib_q;
+reg        paddle_0_tr,    paddle_1_tr;
+
+reg        joya_th_out_q,  joyb_th_out_q;
+wire       joya_th_rise,   joyb_th_rise;
+wire       joya_th_fall,   joyb_th_fall;
+
+always_ff @(posedge clk_sys) begin
+	if (jp_region) begin
+		// Japanese paddle (HPD-200)
+		if (en16khz) begin
+			if (paddle_0_tr) begin
+				{paddle_0_nib_q, paddle_0_nib} <= paddle_0;
+				{paddle_1_nib_q, paddle_1_nib} <= paddle_1;
+				paddle_0_tr  <= 1'b0;
+				paddle_1_tr  <= 1'b0;
+			end else begin
+				paddle_0_nib <= paddle_0_nib_q;
+				paddle_1_nib <= paddle_1_nib_q;
+				paddle_0_tr  <= 1'b1;
+				paddle_1_tr  <= 1'b1;
+			end
+		end
+	end else begin
+		// Export paddle (Non-existent but implemented in some games?)
+		joya_th_out_q <= joya_th_out;
+		joyb_th_out_q <= joyb_th_out;
+
+		if (joya_th_fall) begin
+			{paddle_0_nib_q, paddle_0_nib} <= paddle_0;
+			paddle_0_tr  <= 1'b0;
+		end else if (joya_th_rise) begin
+			paddle_0_nib <= paddle_0_nib_q;
+			paddle_0_tr  <= 1'b0;
+		end
+
+		if (joyb_th_fall) begin
+			{paddle_1_nib_q, paddle_1_nib} <= paddle_1;
+			paddle_1_tr  <= 1'b0;
+		end else if (joyb_th_rise) begin
+			paddle_1_nib <= paddle_1_nib_q;
+			paddle_1_tr  <= 1'b0;
+		end
+	end
+end
+
+assign joya_th_rise = ~joya_th_out_q &  joya_th_out;
+assign joyb_th_rise = ~joyb_th_out_q &  joyb_th_out;
+assign joya_th_fall =  joya_th_out_q & ~joya_th_out;
+assign joyb_th_fall =  joyb_th_out_q & ~joyb_th_out;
+
+wire       en16khz;
+reg [11:0] cnt_en16khz;
+
+always_ff @(posedge clk_sys) begin
+	cnt_en16khz <= cnt_en16khz + 1'd1;
+	if (cnt_en16khz == 3355) cnt_en16khz <= 0;
+end
+assign en16khz = cnt_en16khz == 0;
+
+reg dbg_menu = 0;
+always @(posedge clk_sys) begin
+	reg old_stb;
+	reg enter = 0;
+	reg esc = 0;
+	
+	old_stb <= ps2_key[10];
+	if(old_stb ^ ps2_key[10]) begin
+		if(ps2_key[7:0] == 'h5A) enter <= ps2_key[9];
+		if(ps2_key[7:0] == 'h76) esc   <= ps2_key[9];
+	end
+	
+	if(enter & esc) begin
+		dbg_menu <= ~dbg_menu;
+		enter <= 0;
+		esc <= 0;
+	end
+end
 
 endmodule
