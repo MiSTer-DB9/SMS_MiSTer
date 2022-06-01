@@ -279,13 +279,13 @@ parameter CONF_STR = {
 	"D4P2OL,Gun Port,Port1,Port2;",
 	"D4P2OMN,Cross,Small,Medium,Big,None;",
 	"P2-;",
-	"P2o0,Paddle,Disabled,Enabled;",
+	"P2o56,Paddle Control,Disabled,Paddle,Joy;",
 
 	"-;",
 	"R0,Reset;",
-	"J1,Fire 1,Fire 2,Pause,Coin;",
-	"jn,A|P,B,Start,Coin;",
-	"jp,Y|P,A,Start,Coin;",
+	"J1,Fire 1,Fire 2,Pause,Coin,Arcade 3;",
+	"jn,A|P,B,Start,Coin,X;",
+	"jp,Y|P,A,Start,Coin,X;",
 	"V,v",`BUILD_DATE
 };
 
@@ -682,6 +682,7 @@ system #(63) system
 	.j1_th(joya_th),
 	.j1_start(swap ? joy_1[11] : joy_0[11]),
 	.j1_coin(swap ? joy_1[10] : joy_0[10]),
+	.j1_a3(swap ? joy_1[8] : joy_0[8]),
 
 	.j2_up(joyb[3]),
 	.j2_down(joyb[2]),
@@ -693,6 +694,7 @@ system #(63) system
 	.pause(joya[6]&joyb[6]),
 	.j2_start(swap ? joy_0[11] : joy_1[11]),
 	.j2_coin(swap ? joy_0[10] : joy_1[10]),
+	.j2_a3(swap ? joy_0[8] : joy_1[8]),
 
 	.j1_tr_out(joya_tr_out),
 	.j1_th_out(joya_th_out),
@@ -1108,7 +1110,8 @@ lightgun lightgun
 
 // Paddle support
 wire       jp_region    = status[10];
-wire       paddle_en    = status[32];
+wire       paddle_en    = status[37] | status[38];
+wire       paddle_joy   = status[38];
 
 reg  [3:0] paddle_0_nib,   paddle_1_nib;
 reg  [3:0] paddle_0_nib_q, paddle_1_nib_q;
@@ -1123,8 +1126,13 @@ always_ff @(posedge clk_sys) begin
 		// Japanese paddle (HPD-200)
 		if (en16khz) begin
 			if (paddle_0_tr) begin
+				if (paddle_joy) begin
+					{paddle_0_nib_q, paddle_0_nib} <= {~joy0_x[7], joy0_x[6:0]};
+					{paddle_1_nib_q, paddle_1_nib} <= {~joy1_x[7], joy1_x[6:0]};
+				end else begin
 				{paddle_0_nib_q, paddle_0_nib} <= paddle_0;
 				{paddle_1_nib_q, paddle_1_nib} <= paddle_1;
+				end
 				paddle_0_tr  <= 1'b0;
 				paddle_1_tr  <= 1'b0;
 			end else begin
@@ -1140,7 +1148,11 @@ always_ff @(posedge clk_sys) begin
 		joyb_th_out_q <= joyb_th_out;
 
 		if (joya_th_fall) begin
+			if (paddle_joy) begin
+				{paddle_0_nib_q, paddle_0_nib} <= {~joy0_x[7], joy0_x[6:0]};
+			end else begin
 			{paddle_0_nib_q, paddle_0_nib} <= paddle_0;
+			end
 			paddle_0_tr  <= 1'b0;
 		end else if (joya_th_rise) begin
 			paddle_0_nib <= paddle_0_nib_q;
@@ -1148,7 +1160,11 @@ always_ff @(posedge clk_sys) begin
 		end
 
 		if (joyb_th_fall) begin
+			if (paddle_joy) begin
+				{paddle_1_nib_q, paddle_1_nib} <= {~joy1_x[7], joy1_x[6:0]};
+			end else begin
 			{paddle_1_nib_q, paddle_1_nib} <= paddle_1;
+			end
 			paddle_1_tr  <= 1'b0;
 		end else if (joyb_th_rise) begin
 			paddle_1_nib <= paddle_1_nib_q;
