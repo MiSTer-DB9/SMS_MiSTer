@@ -47,20 +47,22 @@ reg joy1_md_thisscan = 1'b0, joy2_md_thisscan = 1'b0;
 reg [7:0] joy1_chord_cnt = 8'd0, joy2_chord_cnt = 8'd0;
 reg joy1_mode_inject = 1'b0, joy2_mode_inject = 1'b0;
 
-reg [7:0] delay = 8'd0;
-
-always @(posedge clk) begin
-    delay <= delay + 1'd1;
-end
-
 // Single-cycle ticks replace the legacy `posedge|negedge delay[N]` derived
-// clocks. `delay` cycles 0..255 on every clk; the tick conditions fire at the
+// clocks. `delay` free-runs on every clk; the tick conditions fire at the
 // same counter values where the original bit-edges occurred:
 //   delay[5] 0->1 (was `posedge delay[5]`)  : delay[5:0] == 32
 //   delay[5] 1->0 (was `negedge delay[5]`)  : delay[5:0] == 0
 //   delay[7] 1->0 (was `negedge delay[7]`)  : delay      == 0
 // Bodies execute one clk cycle after the original derived edge — negligible
 // vs the /64 (~1.28 us) and /256 (~5.12 us) protocol intervals at 50 MHz.
+//
+// joydb is clocked at a fixed 40-50 MHz (CLK_JOY on the standalone DB9 cores;
+// clk_joy=CLK_50M on jt cores), so one baseline timing path covers every core --
+// no per-clock rescale. (The earlier JTFRAME_SDRAM96 delay-widen was removed once
+// jt cores moved joydb off the 24/48/96 MHz clk_sys onto a fixed CLK_50M, matching
+// the reference cores; clk_sys rescaling could not fix the octopod 2P-MUX demux.)
+reg [7:0] delay = 8'd0;
+always @(posedge clk) delay <= delay + 1'd1;
 wire d5_rise = (delay[5:0] == 6'd32);
 wire d5_fall = (delay[5:0] == 6'd0);
 wire d7_fall = (delay      == 8'd0);
