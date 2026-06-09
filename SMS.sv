@@ -627,8 +627,14 @@ wire [21:0] gamma_bus;
 wire [24:0] ps2_mouse;
 
 //S C B U D L R
-wire [31:0] joy_0 = joydb_1ena? (OSD_STATUS? 32'b000000 : {joydb_1[10],joydb_1[6],joydb_1[5],joydb_1[3:0]}) : joy_0_USB;
-wire [31:0] joy_1 = joydb_2ena? (OSD_STATUS? 32'b000000 : {joydb_2[10],joydb_2[6],joydb_2[5],joydb_2[3:0]}) : joydb_1ena ? joy_0_USB : joy_1_USB;
+// [MiSTer-DB9 BEGIN] - DB9/SNAC8 support: programmable remap matrix
+// joydb_*_mapped carry the DB9/DB15/Saturn buttons rewired into MiSTer-standard
+// order per the user's per-core/per-devtype map (UIO 0xFD). CONF_STR-derived
+// default (gamepad_defaults) reproduces the old fixed permutation; layout is now
+// redefinable in the OSD "Define DB9 buttons" flow.
+wire [31:0] joy_0 = joydb_1ena? (OSD_STATUS? 32'b000000 : joydb_1_mapped[6:0]) : joy_0_USB;
+wire [31:0] joy_1 = joydb_2ena? (OSD_STATUS? 32'b000000 : joydb_2_mapped[6:0]) : joydb_1ena ? joy_0_USB : joy_1_USB;
+// [MiSTer-DB9 END]
 wire [15:0] joy_2 = joydb_1ena ? joy_0_USB : joydb_2ena ? joy_1_USB : joy_2_USB;
 wire [15:0] joy_3 = joydb_1ena ? joy_1_USB : joydb_2ena ? joy_2_USB : joy_3_USB;
 
