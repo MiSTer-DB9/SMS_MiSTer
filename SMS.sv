@@ -631,9 +631,11 @@ wire [24:0] ps2_mouse;
 // joydb_*_mapped carry the DB9/DB15/Saturn buttons rewired into MiSTer-standard
 // order per the user's per-core/per-devtype map (UIO 0xFD). CONF_STR-derived
 // default (gamepad_defaults) reproduces the old fixed permutation; layout is now
-// redefinable in the OSD "Define DB9 buttons" flow.
-wire [31:0] joy_0 = joydb_1ena? (OSD_STATUS? 32'b000000 : joydb_1_mapped[6:0]) : joy_0_USB;
-wire [31:0] joy_1 = joydb_2ena? (OSD_STATUS? 32'b000000 : joydb_2_mapped[6:0]) : joydb_1ena ? joy_0_USB : joy_1_USB;
+// redefinable in the OSD "Define DB9 buttons" flow. Full 13 bits: the map reaches
+// slot 12, so a narrower slice would silently drop Coin, Arcade 3, Soft Reset
+// (joy_0[9]) and the save-state slot on the DB9 path only.
+wire [31:0] joy_0 = joydb_1ena? (OSD_STATUS? 32'b000000 : joydb_1_mapped[12:0]) : joy_0_USB;
+wire [31:0] joy_1 = joydb_2ena? (OSD_STATUS? 32'b000000 : joydb_2_mapped[12:0]) : joydb_1ena ? joy_0_USB : joy_1_USB;
 // [MiSTer-DB9 END]
 wire [15:0] joy_2 = joydb_1ena ? joy_0_USB : joydb_2ena ? joy_1_USB : joy_2_USB;
 wire [15:0] joy_3 = joydb_1ena ? joy_1_USB : joydb_2ena ? joy_2_USB : joy_3_USB;
