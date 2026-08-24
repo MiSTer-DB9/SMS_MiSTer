@@ -4,7 +4,7 @@
 // combos into one-cycle ss_save / ss_load pulses and slot selection.
 //
 // Info message indices for hps_io (1-based; 0 = no display):
-//   1    : hint message ("Slot=LR|Save=Pause+Down|Load=Pause+Up")
+//   1    : hint message ("Slot=LR|Save=SS+Down|Load=SS+Up")
 //   2-5  : "Active Slot 1..4"
 //   6,8,10,12 : "Save to state 1..4"
 //   7,9,11,13 : "Restore state 1..4"
@@ -16,10 +16,12 @@
 // Gamepad combos (SaveState button = joy[12]):
 //   SS + Left              → switch to prev slot
 //   SS + Right             → switch to next slot
-//   SS + Pause + Down      → save state
-//   SS + Pause + Up        → load state
+//   SS + Down              → save state
+//   SS + Up                → load state
 //
-// PS/2 keyboard:  F1 = load state,  Alt+F1 = save state
+// PS/2 keyboard:
+//   F1-F4     = load slots 1-4
+//   Alt+F1-F4 = save slots 1-4
 
 module savestate_ui (
     input             clk,
@@ -53,6 +55,7 @@ reg statusUpdate_pending;
 // PS/2 state
 reg ps2_stb;
 reg alt_held;
+reg [1:0] kbd_slot;
 reg kbd_save, kbd_load;
 
 // Joystick edge trackers
@@ -67,8 +70,10 @@ reg                  ss_combo_done; // combo or timeout already fired this press
 // OSD edge trackers
 reg old_osd_save, old_osd_load;
 
+reg [27:0] cooldown_cnt = 0;
+
 // -----------------------------------------------------------------------
-// PS/2 keyboard: F1 = load,  Alt+F1 = save
+// PS/2 keyboard: F1-F4 = load, Alt+F1-F4 = save
 // -----------------------------------------------------------------------
 always @(posedge clk) begin
     ps2_stb  <= ps2_key[10];
@@ -76,11 +81,32 @@ always @(posedge clk) begin
     kbd_load <= 0;
 
     if (ps2_stb ^ ps2_key[10]) begin
+        // Accept both left Alt and right Alt (AltGr).
         if (ps2_key[7:0] == 8'h11)
             alt_held <= ps2_key[9];
-        if (ps2_key[7:0] == 8'h05 && ps2_key[9]) begin
-            if (alt_held) kbd_save <= 1;
-            else          kbd_load <= 1;
+
+        // PS/2 Set-2 scan codes:
+        // F1=05, F2=06, F3=04, F4=0C
+        if (ps2_key[9]) begin
+            case (ps2_key[7:0])
+                8'h05: begin
+                    kbd_slot <= 2'd0; // F1: slot 1
+                    if (alt_held) kbd_save <= 1; else kbd_load <= 1;
+                end
+                8'h06: begin
+                    kbd_slot <= 2'd1; // F2: slot 2
+                    if (alt_held) kbd_save <= 1; else kbd_load <= 1;
+                end
+                8'h04: begin
+                    kbd_slot <= 2'd2; // F3: slot 3
+                    if (alt_held) kbd_save <= 1; else kbd_load <= 1;
+                end
+                8'h0C: begin
+                    kbd_slot <= 2'd3; // F4: slot 4
+                    if (alt_held) kbd_save <= 1; else kbd_load <= 1;
+                end
+                default: ;
+            endcase
         end
     end
 end
@@ -89,6 +115,11 @@ end
 // Main logic: OSD / keyboard / gamepad
 // -----------------------------------------------------------------------
 always @(posedge clk) begin
+    // Cooldown timer decrement
+    if (cooldown_cnt != 0) begin
+        cooldown_cnt <= cooldown_cnt - 28'd1;
+    end
+
     // Defaults
     ss_save              <= 0;
     ss_load              <= 0;
@@ -129,7 +160,7 @@ always @(posedge clk) begin
 
     // Sync slot when user changes it through the OSD menu
     old_status_slot <= status_slot;
-    if (status_slot != old_status_slot)
+    if (status_slot != old_status_slot && (cooldown_cnt == 0))
         slot <= status_slot;
 
     // selected_slot tracks slot with 1-cycle lag; aligned with statusUpdate
@@ -139,60 +170,74 @@ always @(posedge clk) begin
     old_osd_save <= OSD_saveload[0];
     old_osd_load <= OSD_saveload[1];
 
-    if (~old_osd_save & OSD_saveload[0] & allow_ss) begin
-        ss_save     <= 1;
-        ss_info_req <= 1;
-        ss_info     <= 8'd6 + {slot, 1'b0};   // "Save to state N"  (1-based: 6,8,10,12)
+    if (~old_osd_save & OSD_saveload[0] & allow_ss && (cooldown_cnt == 0)) begin
+        ss_save      <= 1;
+        ss_info_req  <= 1;
+        ss_info      <= 8'd6 + {slot, 1'b0};   // "Save to state N"  (1-based: 6,8,10,12)
+        cooldown_cnt <= 28'd26846500;          // 500ms cooldown
     end
-    if (~old_osd_load & OSD_saveload[1] & allow_ss) begin
-        ss_load     <= 1;
-        ss_info_req <= 1;
-        ss_info     <= 8'd7 + {slot, 1'b0};   // "Restore state N"  (1-based: 7,9,11,13)
+    if (~old_osd_load & OSD_saveload[1] & allow_ss && (cooldown_cnt == 0)) begin
+        ss_load      <= 1;
+        ss_info_req  <= 1;
+        ss_info      <= 8'd7 + {slot, 1'b0};   // "Restore state N"  (1-based: 7,9,11,13)
+        cooldown_cnt <= 28'd26846500;          // 500ms cooldown
     end
 
     // PS/2 keyboard shortcuts
-    if (kbd_save & allow_ss) begin
-        ss_save     <= 1;
-        ss_info_req <= 1;
-        ss_info     <= 8'd6 + {slot, 1'b0};
-    end
-    if (kbd_load & allow_ss) begin
-        ss_load     <= 1;
-        ss_info_req <= 1;
-        ss_info     <= 8'd7 + {slot, 1'b0};
+    if ((kbd_save | kbd_load) & allow_ss && (cooldown_cnt == 0)) begin
+        // Keyboard shortcuts address a slot directly, rather than using
+        // the slot which happened to be selected before the keypress.
+        slot                 <= kbd_slot;
+        selected_slot        <= kbd_slot;
+        statusUpdate_pending <= 1;
+        ss_info_req  <= 1;
+
+        if (kbd_save) begin
+            ss_save <= 1;
+            ss_info <= 8'd6 + {kbd_slot, 1'b0};
+        end else begin
+            ss_load <= 1;
+            ss_info <= 8'd7 + {kbd_slot, 1'b0};
+        end
+
+        cooldown_cnt <= 28'd26846500;          // 500ms cooldown
     end
 
     // Gamepad combos — only when the dedicated SaveState button is held
     if (joySS) begin
         // Rising edge of Left (no Pause): previous slot
-        if (~joyLeft_r & joyLeft & ~joyPause) begin
+        if (~joyLeft_r & joyLeft & ~joyPause && (cooldown_cnt == 0)) begin
             slot                 <= (slot == 2'd0) ? 2'd3 : slot - 2'd1;
             statusUpdate_pending <= 1;
             ss_info_req          <= 1;
             ss_info              <= 8'd2 + ((slot == 2'd0) ? 2'd3 : slot - 2'd1);
             ss_combo_done        <= 1;
+            cooldown_cnt         <= 28'd26846500;  // 500ms slot cooldown
         end
         // Rising edge of Right (no Pause): next slot
-        if (~joyRight_r & joyRight & ~joyPause) begin
+        if (~joyRight_r & joyRight & ~joyPause && (cooldown_cnt == 0)) begin
             slot                 <= (slot == 2'd3) ? 2'd0 : slot + 2'd1;
             statusUpdate_pending <= 1;
             ss_info_req          <= 1;
             ss_info              <= 8'd2 + ((slot == 2'd3) ? 2'd0 : slot + 2'd1);
             ss_combo_done        <= 1;
+            cooldown_cnt         <= 28'd26846500;  // 500ms slot cooldown
         end
-        // Rising edge of Down while Pause held: save
-        if (joyPause & ~joyDown_r & joyDown & allow_ss) begin
+        // Rising edge of Down (no Pause needed): save
+        if (~joyDown_r & joyDown & ~joyLeft & ~joyRight & allow_ss && (cooldown_cnt == 0)) begin
             ss_save       <= 1;
             ss_info_req   <= 1;
             ss_info       <= 8'd6 + {slot, 1'b0};
             ss_combo_done <= 1;
+            cooldown_cnt  <= 28'd26846500;      // 500ms cooldown
         end
-        // Rising edge of Up while Pause held: load
-        if (joyPause & ~joyUp_r & joyUp & allow_ss) begin
+        // Rising edge of Up (no Pause needed): load
+        if (~joyUp_r & joyUp & ~joyLeft & ~joyRight & allow_ss && (cooldown_cnt == 0)) begin
             ss_load       <= 1;
             ss_info_req   <= 1;
             ss_info       <= 8'd7 + {slot, 1'b0};
             ss_combo_done <= 1;
+            cooldown_cnt  <= 28'd26846500;      // 500ms cooldown
         end
     end
 end

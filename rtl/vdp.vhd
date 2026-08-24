@@ -27,6 +27,7 @@ entity vdp is
 		D_out:			out STD_LOGIC_VECTOR (7 downto 0);
 		x:					in  STD_LOGIC_VECTOR (8 downto 0);
 		y:					in  STD_LOGIC_VECTOR (8 downto 0);
+		vcounter_cpu:		in  STD_LOGIC_VECTOR (7 downto 0);
 		color:			out STD_LOGIC_VECTOR (11 downto 0);
 		palettemode:	in STD_LOGIC;
 		y1:            out std_logic;
@@ -80,8 +81,8 @@ entity vdp is
 		--  [117]          collide_flag
 		--  [118]          overflow_flag
 		--  [119]          line_overflow
-		--  [120]          last_x0
-		-- Total: 121 bits -> packed into ss_regs[127:0] (16 bytes, 2 DDRAM words)
+		--  [127:120]      bg_scroll_x_latched
+		-- Total: 128 bits -> packed into ss_regs[127:0] (16 bytes, 2 DDRAM words)
 		ss_regs_out    : out STD_LOGIC_VECTOR(127 downto 0);
 		-- Restore: load all VDP control registers at once (held one cycle while ss_regs_set='1')
 		ss_regs_in     : in  STD_LOGIC_VECTOR(127 downto 0) := (others => '0');
@@ -158,6 +159,7 @@ architecture Behavioral of vdp is
 	signal m2mg_address:		std_logic_vector (2 downto 0) := (others=>'0');
 	signal m2ct_address:		std_logic_vector (7 downto 0) := (others=>'1');
 	signal bg_scroll_x:		std_logic_vector(7 downto 0) := (others=>'0');
+	signal bg_scroll_x_latched : std_logic_vector(7 downto 0) := (others => '0');
 	signal bg_scroll_y:		std_logic_vector(7 downto 0) := (others=>'0');
 	signal spr_address:		std_logic_vector (6 downto 0) := (others=>'0');
 	signal spr_shift:			std_logic := '0';
@@ -214,6 +216,9 @@ begin
 				
 		x					=> x,
 		y					=> y,
+		ss_regs_set		    => ss_regs_set,
+		ss_line_reset		=> ss_regs_set,
+		ss_sprite_reset		=> ss_regs_set,
 
 		color				=> color,
 		palettemode			=> palettemode,
@@ -235,7 +240,7 @@ begin
 		bg_address		=> bg_address,
 		m2mg_address	=> m2mg_address,
 		m2ct_address	=> m2ct_address,
-		bg_scroll_x		=> bg_scroll_x,
+		bg_scroll_x		=> bg_scroll_x_latched,
 		bg_scroll_y		=> bg_scroll_y,
 		disable_hscroll=>disable_hscroll,
 		disable_vscroll => disable_vscroll,
@@ -343,8 +348,7 @@ begin
 	ss_regs_out(117)         	<= collide_flag;
 	ss_regs_out(118)         	<= overflow_flag;
 	ss_regs_out(119)         	<= line_overflow;
-	ss_regs_out(120)         	<= last_x0;
-	ss_regs_out(127 downto 121)	<= (others => '0');
+	ss_regs_out(127 downto 120)	<= bg_scroll_x_latched;
 
 	smode_M1 <= mode_M1 and mode_M2 ;
 	smode_M2 <= mode_M2;
@@ -504,7 +508,7 @@ begin
 				elsif old_RD_n = '1' and RD_n='0' then
 					case A(7 downto 6)&A(0) is
 					when "010" => -- VCounter
-						D_out <= y(7 downto 0);
+						D_out <= vcounter_cpu;
 					when "011" => -- HCounter
 						D_out <= latched_x;
 					when "100" => -- Data port
@@ -544,9 +548,8 @@ begin
 	begin
 		if rising_edge(clk_sys) then
 			if ss_regs_set = '1' then
-				-- vbl_irq is transient; starting from asserted state can trigger
-				-- immediate post-restore interrupts on rapid consecutive loads.
-				vbl_irq <= '0';
+				-- Restore the interrupt state from save-state instead of clearing it
+				vbl_irq <= ss_regs_in(115);
 			elsif ce_vdp = '1' then
 --				485 instead of 487 to please VDPTEST 
 				if	x=485 and ((y=224 and xmode_M1='1') 
@@ -565,14 +568,10 @@ begin
 	begin
 		if rising_edge(clk_sys) then
 			if ss_regs_set = '1' then
-				last_x0 <= ss_regs_in(120);
-				-- Restore hbl_counter to irq_line_count, not the mid-frame save-time value.
-				-- We always unfreeze at VBlank end (y=0), where hbl_counter must equal
-				-- irq_line_count (reloaded from it every VBlank by the normal logic).
-				-- Restoring the save-time countdown would cause the first post-restore
-				-- line IRQ to fire at the wrong scanline → garbled scroll effects.
-				hbl_counter <= ss_regs_in(69 downto 62); -- irq_line_count
-				hbl_irq <= '0';
+				last_x0 <= std_logic(x(0));
+				-- Restore hbl_counter to the actual saved value from ss_regs_in(111 downto 104).
+				hbl_counter <= ss_regs_in(111 downto 104);
+				hbl_irq <= ss_regs_in(116);
 			elsif ce_vdp = '1' then
 				last_x0 <= std_logic(x(0));
 				if x=486 and not (last_x0=std_logic(x(0))) then
@@ -597,11 +596,21 @@ begin
 	begin
 		if rising_edge(clk_sys) then
 			if ss_regs_set = '1' then
-				irq_delay     <= "111";
+				irq_delay     <= ss_regs_in(114 downto 112);
 				collide_flag  <= ss_regs_in(117);
 				overflow_flag <= ss_regs_in(118);
 				line_overflow <= ss_regs_in(119);
-				IRQ_n         <= '1';
+				xspr_collide_shift <= (others => '0');
+				-- Immediately restore IRQ_n level corresponding to the restored snapshot state
+				if ((ss_regs_in(115) = '1' and ss_regs_in(8) = '1') or (ss_regs_in(116) = '1' and ss_regs_in(3) = '1')) then
+					if ss_regs_in(114 downto 112) = "000" then
+						IRQ_n <= '0';
+					else
+						IRQ_n <= '1';
+					end if;
+				else
+					IRQ_n <= '1';
+				end if;
 			else
 				-- using the other phase of ce_vdp permits to please VDPTEST ovr HCounter
 				-- very tight condition;
@@ -652,4 +661,23 @@ begin
 		end if;
 	end process;
 	
+	-- YM2602 / Nuked-SMS-FPGA latches R8 at horizontal count 488.
+	-- Captured at x=487 so the updated value is available to the background
+	-- pipeline when line_reset triggers at x=488.
+	process (clk_sys)
+	begin
+		if rising_edge(clk_sys) then
+			if reset_n = '0' then
+				bg_scroll_x_latched <= (others => '0');
+			elsif ss_regs_set = '1' then
+				-- Preserve deterministic behavior after restoring a state.
+				bg_scroll_x_latched <= ss_regs_in(127 downto 120);
+			elsif ce_pix = '1' then
+				if x = conv_std_logic_vector(487, 9) then
+					bg_scroll_x_latched <= bg_scroll_x;
+				end if;
+			end if;
+		end if;
+	end process;
+
 end Behavioral;
