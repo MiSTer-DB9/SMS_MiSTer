@@ -345,7 +345,12 @@ always_comb begin
 			if (border) begin
 				arx = 6'd47;
 				ary = 6'd35;
-			end else begin
+			end
+			else if (status[29] && ~status[13]) begin
+				arx = 6'd31;
+				ary = 6'd21;
+			end
+			else begin
 				arx = 6'd32;
 				ary = 6'd21;
 			end
@@ -508,7 +513,7 @@ parameter CONF_STR = {
 	"Restore state 3,",
 	"Save to state 4,",
 	"Restore state 4;",
-	"V,v",`BUILD_DATE
+	"V,v",`BUILD_DATE 
 };
 
 
