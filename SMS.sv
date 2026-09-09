@@ -398,7 +398,16 @@ always_ff @(posedge clk_sys) begin
 	bios_config_reset <= (reset_timer > 0);
 end
 
-wire raw_reset = RESET | status[0] | buttons[1] | cart_download | bios_download | gg_bios_download | bios_config_reset | bk_loading | eject_rom;
+// The Evolution controller's X, Y and Z buttons are wired so pressing all
+// three pulls the console's RESET input low.  MiSTer's SMS controller map
+// exposes no separate X/Y/Z inputs, so Fire1+Fire2+Pause is the usable
+// three-button equivalent.
+wire evolution_mode;
+wire evolution_xyz_combo = evolution_mode &
+	((joy_0[4] & joy_0[5] & joy_0[6]) |
+	 (joy_1[4] & joy_1[5] & joy_1[6]));
+
+wire raw_reset = RESET | status[0] | buttons[1] | cart_download | bios_download | gg_bios_download | bios_config_reset | bk_loading | eject_rom | evolution_xyz_combo;
 
 reg [13:0] ram_clr_addr;
 reg        ram_clr_run = 0;
@@ -510,7 +519,7 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(0)) hps_io
 	.ps2_mouse(ps2_mouse)
 );
 
-wire [21:0] ram_addr;
+wire [23:0] ram_addr;
 wire  [7:0] ram_dout;
 wire        ram_rd;
 
@@ -711,7 +720,7 @@ reg        load_sc     = 0;
 reg        load_sg     = 0;
 reg        load_sc_multicart = 0;
 reg        load_sc_megacart = 0;
-reg [21:0] cart_mask, cart_mask512;
+reg [23:0] cart_mask, cart_mask512;
 reg        cart_sz512;
 wire [7:0] ioctl_ext_b0 = ioctl_file_ext[7:0];
 wire [7:0] ioctl_ext_b1 = ioctl_file_ext[15:8];
@@ -773,8 +782,8 @@ always @(posedge clk_sys) begin
 		sc_multicart_auto <= 0;
 		sc_megacart_auto <= 0;
 	end else if (ioctl_wr & cart_download) begin
-		cart_mask <= cart_mask | ioctl_addr[21:0];
-		cart_mask512 <= cart_mask512 | (ioctl_addr[21:0] - 10'd512);
+		cart_mask <= cart_mask | ioctl_addr[23:0];
+		cart_mask512 <= cart_mask512 | (ioctl_addr[23:0] - 10'd512);
 		if (!ioctl_addr)
 			cart_mask <= 0;
 		if (ioctl_addr == 512)
@@ -853,6 +862,8 @@ wire         ss_vram_WE;
 wire [55:0]  ss_psg_out, ss_psg_in;
 wire         ss_psg_set;
 wire [63:0]  ss_mapper_out, ss_mapper_in;
+wire [95:0]  ss_evolution_out, ss_evolution_in;
+wire         ss_evolution_set;
 wire         ss_mapper_set;
 wire [31:0]  ss_io_out, ss_io_in;
 wire         ss_io_set;
@@ -926,6 +937,10 @@ wire mapper_force_codies    = (mapper_sel == 4'd2);
 wire mapper_force_dahjee_a  = (mapper_sel == 4'd3);
 wire mapper_force_linear    = (mapper_sel == 4'd4);
 wire mapper_force_zemina    = (mapper_sel == 4'd5);  // covers MSX, Nemesis II+ and Zemina (all identical)
+// Evolution is identified from either known full-flash CRC in system.vhd.
+// It intentionally has no manual OSD selection.
+wire mapper_force_evolution = 1'b0;
+wire evolution_gg_mode;
 wire mapper_eeprom;
 wire eeprom_active          = mapper_eeprom;
 
@@ -1044,6 +1059,9 @@ system #(63) system
 	.mapper_dahjee_a_force(mapper_force_dahjee_a),
 	.mapper_linear_force(mapper_force_linear),
 	.mapper_zemina_force(mapper_force_zemina),
+	.mapper_evolution_force(mapper_force_evolution),
+	.evolution_gg_active(evolution_gg_mode),
+	.evolution_active(evolution_mode),
 	.mapper_eeprom_out(mapper_eeprom),
 	.eeprom_ss_out(eeprom_ss_out),
 	.eeprom_ss_in (eeprom_ss_in),
@@ -1100,6 +1118,9 @@ system #(63) system
 	.mapper_out  (ss_mapper_out),
 	.mapper_in   (ss_mapper_in),
 	.mapper_set  (ss_mapper_set),
+	.evolution_ss_out(ss_evolution_out),
+	.evolution_ss_in (ss_evolution_in),
+	.evolution_ss_set(ss_evolution_set),
 	.z80_m1_n    (ss_z80_m1_n),
 	.z80_mreq_n  (ss_z80_mreq_n),
 	.z80_iset    (ss_z80_iset),
@@ -1194,6 +1215,9 @@ savestates savestates_inst (
 	.mapper_out      (ss_mapper_out),
 	.mapper_in       (ss_mapper_in),
 	.mapper_set      (ss_mapper_set),
+	.evolution_out   (ss_evolution_out),
+	.evolution_in    (ss_evolution_in),
+	.evolution_set   (ss_evolution_set),
 	// EEPROM
 	.eeprom_out      (eeprom_ss_out),
 	.eeprom_in       (eeprom_ss_in),
@@ -1439,8 +1463,11 @@ wire [11:0] color;
 wire mask_column;
 wire smode_M1, smode_M2, smode_M3, smode_M4;
 wire pal = status[2];
-wire border = status[13] & ~gg;
-wire ggres = ~status[39] & gg;
+// Evolution's Sonic Drift 2 uses GG CRAM and controls on a TV-sized raster.
+// Keep the full SMS output, including the original game's off-screen garbage.
+wire gg_video = gg;
+wire border = status[13] & ~gg_video;
+wire ggres = ~status[39] & gg_video;
 wire turbo = status[40];
 
 video video
