@@ -353,6 +353,9 @@ architecture Behavioral of system is
 	end function;
 
 	signal bootloader_n:	std_logic := '0';
+	signal media_control:   std_logic_vector(7 downto 5) := "101";
+	signal cart_precedence: std_logic;
+	signal io_state_out_i:  std_logic_vector(31 downto 0);
 	signal active_bios:     std_logic;
 	signal irom_D_out:		std_logic_vector(7 downto 0);
 	signal irom_RD_n:			std_logic := '1';
@@ -989,7 +992,7 @@ port map(
 		psg_enables   => psg_enables,
 		se_mapper_in  => mapper_in(7 downto 0),
 		se_mapper_set => mapper_set,
-		io_state_out  => io_state_out,
+		io_state_out  => io_state_out_i,
 		io_state_in   => io_state_in,
 		io_state_set  => io_state_set,
 		mapper_evolution_force => mapper_evolution,
@@ -1325,6 +1328,32 @@ port map(
 
 	active_bios <= '1' when (bios_en = '1' and (ext_bios_sel = '0' or ext_bios_loaded = '1')) or (gg_bios_en = '1' and ext_gg_bios_loaded = '1') else '0';
 
+	-- Only cartridge visibility currently affects emulation. Preserve it in the
+	-- spare IO state bit; older states stored zero here (cartridge enabled).
+	io_state_out <= media_control(6) & io_state_out_i(30 downto 0);
+	process (clk_sys)
+	begin
+		if rising_edge(clk_sys) then
+			if RESET_n='0' then
+				-- Cartridge precedence must not bypass the BIOS at reset.
+				if bios_en='1' and gg='0' and
+				   ext_bios_sel='1' and ext_bios_loaded='1' then
+					media_control <= "111";
+				else
+					media_control <= "101";
+				end if;
+			elsif mapper_set='1' then
+				-- Legacy states without IO retain cartridge-enabled behavior.
+				media_control <= "101";
+			elsif io_state_set='1' then
+				-- Card/expansion have no backing media or emulated state yet.
+				media_control <= '1' & io_state_in(31) & '1';
+			elsif ss_freeze='0' and ctl_WR_n='0' and A(7 downto 0)=x"3E" then
+				media_control <= D_in(7 downto 5);
+			end if;
+		end if;
+	end process;
+
 	process (clk_sys)
 	begin
 		if rising_edge(clk_sys) then
@@ -1370,8 +1399,8 @@ port map(
 	-- When ext BIOS is active and BIOS ROM is enabled (bootloader_n=0):
 	-- serve all ROM banks (0, 1, 2) from SPRAM so the full 256KB BIOS can run.
 	-- When BIOS ROM is disabled (bootloader_n=1, triggered by port $3E bit3=1):
-	-- serve SDRAM (cartridge) so the BIOS detection code (running from RAM) can
-	-- read the cartridge header. The BIOS then re-enables itself (bit3=0) if no
+	-- serve SDRAM only when the cartridge is selected; card/expansion probes
+	-- see an empty slot. The BIOS then re-enables itself (bit3=0) if no
 	-- valid cart is found, causing bootloader_n to go back to 0, and JP $0000
 	-- will fall back into the SPRAM BIOS - giving the correct no-cart loop.
 	active_bios_D_out <= ext_bios_D_out when (ext_bios_sel='1' and ext_bios_loaded='1') else boot_rom_D_out;
@@ -1383,9 +1412,19 @@ port map(
 		jang_rev4 when mapper_janggun = '1' and bootloader_n = '1' and A(15 downto 13) = "101" else
 		'0';
 
+	-- Original Master System hardware gives cartridge data precedence when
+	-- the BIOS and cartridge are enabled simultaneously. The core models
+	-- this SMS1 behavior for external SMS BIOS operation.
+	cart_precedence <= '1' when (gg='0' and gg_bios_en='0' and bios_en='1'
+	                               and ext_bios_sel='1' and ext_bios_loaded='1' and dbr='1'
+	                               and bootloader_n='0' and media_control(6)='0') else '0';
+
 	irom_D_out <=	ext_gg_bios_D_out when (bootloader_n='0' and gg_bios_en='1' and ext_gg_bios_loaded='1' and A(15 downto 14)="00")
-	               else active_bios_D_out when (bootloader_n='0' and gg_bios_en='0' and A(15 downto 14)="00")
-	               else ext_bios_D_out when (bootloader_n='0' and gg_bios_en='0' and ext_bios_sel='1' and ext_bios_loaded='1' and A(15 downto 14)/="11")
+	               else active_bios_D_out when (bootloader_n='0' and gg_bios_en='0' and cart_precedence='0' and A(15 downto 14)="00")
+	               else ext_bios_D_out when (bootloader_n='0' and gg_bios_en='0' and ext_bios_sel='1' and ext_bios_loaded='1' and cart_precedence='0' and A(15 downto 14)/="11")
+	               -- External SMS BIOS media probes: port $3E bit 6 is active low.
+	               else x"FF" when (bootloader_n='1' and bios_en='1' and gg='0' and gg_bios_en='0'
+	                               and ext_bios_sel='1' and ext_bios_loaded='1' and media_control(6)='1')
 	               -- Empty cartridge slot: data lines float high on real hardware.
 	               -- Without this, SDRAM returns stale data from the last loaded ROM,
 	               -- causing BIOSes that check for non-0xFF bytes (Korea) to
